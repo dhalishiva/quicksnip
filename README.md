@@ -1,3 +1,5 @@
+<p align="center"><img src="icons/io.github.quicksnip.svg" width="112" alt="QuickSnip icon"></p>
+
 # QuickSnip
 
 A Windows-style snipping tool for Ubuntu / GNOME on Wayland.
@@ -35,7 +37,7 @@ cd quicksnip
 
 The installer:
 
-- copies `quicksnip.py` to `~/.local/bin/quicksnip`
+- copies `quicksnip.py` to `~/.local/bin/quicksnip` and installs the app icon
 - adds a desktop entry and D-Bus service (needed for clickable notifications)
 - binds **Super+Shift+S** as a GNOME custom shortcut (change it in Settings → Keyboard → Custom Shortcuts)
 
@@ -55,7 +57,8 @@ background (no window) until something else is copied.
 ```bash
 rm ~/.local/bin/quicksnip \
    ~/.local/share/applications/io.github.quicksnip.desktop \
-   ~/.local/share/dbus-1/services/io.github.quicksnip.service
+   ~/.local/share/dbus-1/services/io.github.quicksnip.service \
+   ~/.local/share/icons/hicolor/scalable/apps/io.github.quicksnip.svg
 ```
 
 Then remove the shortcut in Settings → Keyboard → Custom Shortcuts.

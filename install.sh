@@ -7,6 +7,12 @@ BIN="$HOME/.local/bin/quicksnip"
 mkdir -p "$(dirname "$BIN")"
 install -m 755 "$(dirname "$0")/quicksnip.py" "$BIN"
 
+# App icon
+ICON_DIR="$HOME/.local/share/icons/hicolor/scalable/apps"
+mkdir -p "$ICON_DIR"
+install -m 644 "$(dirname "$0")/icons/$APP_ID.svg" "$ICON_DIR/$APP_ID.svg"
+gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
+
 # Desktop entry + D-Bus service: GNOME needs these to show our notifications
 # and to relaunch us when a notification is clicked after we've exited.
 mkdir -p "$HOME/.local/share/applications" "$HOME/.local/share/dbus-1/services"
@@ -16,7 +22,7 @@ Type=Application
 Name=QuickSnip
 Comment=Drag to capture a screenshot
 Exec=$BIN
-Icon=applets-screenshooter
+Icon=$APP_ID
 Terminal=false
 Categories=Utility;Graphics;
 DBusActivatable=true

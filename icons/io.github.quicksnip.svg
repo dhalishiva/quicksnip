@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2b3a67"/>
+      <stop offset="1" stop-color="#151b33"/>
+    </linearGradient>
+    <linearGradient id="snip" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5ee7c4"/>
+      <stop offset="1" stop-color="#2bb3d9"/>
+    </linearGradient>
+  </defs>
+
+  <!-- tile -->
+  <rect x="8" y="8" width="112" height="112" rx="26" fill="url(#bg)"/>
+
+  <!-- dimmed "frozen screen" lines -->
+  <g fill="#ffffff" opacity="0.10">
+    <rect x="22" y="24" width="52" height="6" rx="3"/>
+    <rect x="22" y="98" width="40" height="6" rx="3"/>
+    <rect x="88" y="24" width="18" height="6" rx="3"/>
+  </g>
+
+  <!-- the bright snipped region -->
+  <rect x="30" y="40" width="64" height="48" rx="6" fill="url(#snip)"/>
+
+  <!-- markup stroke on the snip -->
+  <path d="M40 74 C50 62, 58 80, 68 66 S82 58, 86 52" fill="none"
+        stroke="#ff6b5b" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- selection corner brackets -->
+  <g fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M24 46 V34 H36"/>
+    <path d="M88 34 H100 V46"/>
+    <path d="M24 82 V94 H36"/>
+  </g>
+
+  <!-- crosshair at the drag corner -->
+  <g stroke="#ffffff" stroke-width="5" stroke-linecap="round">
+    <path d="M100 80 V108"/>
+    <path d="M86 94 H114"/>
+  </g>
+</svg>
