@@ -8,7 +8,7 @@ Press **Super+Shift+S**, drag a box, let go — that's it. No "select area → c
 
 - The screen freezes and dims; the area you drag is shown at full brightness.
 - On mouse release the snip is **copied to the clipboard** and **saved** to `~/Pictures/Screenshots/`.
-- A notification pops up with a preview — **click it to mark up** the screenshot.
+- A notification pops up with a preview — **click it to mark up** the screenshot or **extract its text**.
 - Works across multiple monitors (drag on any one of them).
 - **Esc** or right-click cancels.
 
@@ -24,10 +24,22 @@ Press **Super+Shift+S**, drag a box, let go — that's it. No "select area → c
 
 Six colours, plus **Undo** (Ctrl+Z), **Copy** (Ctrl+C), **Save** (Ctrl+S, overwrites the snip) and **Save as** (Ctrl+Shift+S).
 
+### Extract text
+
+Click the **text** button (or Ctrl+T): every word in the screenshot gets highlighted right on the image.
+Drag across words to select them like normal text (or drag a box from empty space to grab a block),
+then press **Ctrl+C**. **Copy all text** (or Ctrl+C with nothing selected) copies everything;
+Ctrl+A selects all; Esc leaves text mode. It reads the image as currently cropped. Needs Tesseract OCR:
+
+```bash
+sudo apt install tesseract-ocr
+```
+
 ## Install
 
 Requirements: GNOME on Wayland (tested on Ubuntu 26.04, GNOME 50), Python 3 with GTK 4 bindings
 (`python3-gi`, `gir1.2-gtk-4.0`, `python3-gi-cairo` — preinstalled on Ubuntu desktop).
+Optional: `tesseract-ocr` for text extraction.
 
 ```bash
 git clone https://github.com/dhalishiva/quicksnip.git

@@ -3,7 +3,8 @@
 
 Run it (bound to Super+Shift+S), drag a rectangle, release the mouse:
 the region is copied to the clipboard, saved to ~/Pictures/Screenshots,
-and a notification appears; click it to annotate the screenshot.
+and a notification appears; click it to annotate the screenshot or
+extract its text (OCR via Tesseract).
 Esc or right-click cancels a capture.
 """
 import io
@@ -165,6 +166,11 @@ class EditorWindow(Gtk.ApplicationWindow):
         self.current = None    # op being drawn right now
         self.tool = "pen"
         self.color = "red"
+        self.text_mode = False
+        self.words = []        # OCR'd words: {"rect", "text", "line", "block"} in image coords
+        self.selected = []     # indices into self.words
+        self.text_drag = None
+        self.ocr_key = None    # which edit state self.words belongs to
 
         css = Gtk.CssProvider()
         css.load_from_string(EDITOR_CSS)
@@ -187,6 +193,7 @@ class EditorWindow(Gtk.ApplicationWindow):
             btn.connect("toggled", self.on_tool, name)
             tools.append(btn)
         header.pack_start(tools)
+        self.tools_box = tools
 
         swatches = Gtk.Box(spacing=6, margin_start=6)
         first = None
@@ -199,6 +206,7 @@ class EditorWindow(Gtk.ApplicationWindow):
             btn.connect("toggled", self.on_color, name)
             swatches.append(btn)
         header.pack_start(swatches)
+        self.swatches_box = swatches
 
         for icon, tip, cb in (("document-save-as-symbolic", "Save as… (Ctrl+Shift+S)", self.save_as),
                               ("document-save-symbolic", "Save (Ctrl+S)", self.save),
@@ -208,6 +216,13 @@ class EditorWindow(Gtk.ApplicationWindow):
             btn.connect("clicked", lambda _b, f=cb: f())
             header.pack_end(btn)
 
+        self.text_btn = Gtk.ToggleButton(icon_name="insert-text-symbolic", tooltip_text="Select text (Ctrl+T)")
+        self.text_btn.connect("toggled", self.on_text_toggled)
+        header.pack_end(self.text_btn)
+        self.copy_all_btn = Gtk.Button(label="Copy all text", visible=False)
+        self.copy_all_btn.connect("clicked", lambda _b: self.copy_text(all_words=True))
+        header.pack_end(self.copy_all_btn)
+
         self.area = Gtk.DrawingArea(hexpand=True, vexpand=True)
         self.area.set_draw_func(self.on_draw)
         self.area.set_cursor_from_name("crosshair")
@@ -216,6 +231,7 @@ class EditorWindow(Gtk.ApplicationWindow):
         drag.connect("drag-update", self.on_drag_update)
         drag.connect("drag-end", self.on_drag_end)
         self.area.add_controller(drag)
+
         self.set_child(self.area)
 
         keys = Gtk.EventControllerKey()
@@ -279,13 +295,38 @@ class EditorWindow(Gtk.ApplicationWindow):
             ctx.stroke()
         elif cur:
             draw_op(ctx, cur)
+        if self.text_mode:
+            self.draw_text_overlay(ctx, s, (rx, ry, rw, rh))
 
-    def export_png(self):
+    def draw_text_overlay(self, ctx, s, region):
+        ctx.rectangle(*region)
+        ctx.set_source_rgba(0, 0, 0, 0.3)
+        ctx.fill()
+        selected = set(self.selected)
+        pad = 2
+        for i, w in enumerate(self.words):
+            x, y, ww, wh = w["rect"]
+            ctx.rectangle(x - pad, y - pad, ww + 2 * pad, wh + 2 * pad)
+            if i in selected:
+                ctx.set_source_rgba(0.21, 0.52, 0.89, 0.5)
+            else:
+                ctx.set_source_rgba(1, 1, 1, 0.22)
+            ctx.fill()
+        drag = self.text_drag
+        if drag and drag.get("marquee"):
+            ctx.rectangle(*drag["marquee"])
+            ctx.set_source_rgb(1, 1, 1)
+            ctx.set_line_width(1.5 / s)
+            ctx.set_dash([6 / s, 4 / s])
+            ctx.stroke()
+
+    def export_png(self, scale=1, annotate=True):
         rx, ry, rw, rh = (round(v) for v in self.region())
-        surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, rw, rh)
+        surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, rw * scale, rh * scale)
         ctx = cairo.Context(surface)
+        ctx.scale(scale, scale)
         ctx.translate(-rx, -ry)
-        self.render(ctx, self.ops)
+        self.render(ctx, self.ops if annotate else [])
         buf = io.BytesIO()
         surface.write_to_png(buf)
         return buf.getvalue()
@@ -301,13 +342,22 @@ class EditorWindow(Gtk.ApplicationWindow):
             self.color = name
 
     def on_drag_begin(self, _g, x, y):
+        if self.text_mode:
+            p = self.to_image(x, y)
+            s, _, _ = self.view()
+            self.text_drag = {"start": p, "anchor": self.word_at(p, max_dist=12 / s)}
+            self.update_text_selection(p)
+            return
         self.current = {"tool": self.tool, "color": COLORS[self.color], "pts": [self.to_image(x, y)]}
         self.area.queue_draw()
 
     def on_drag_update(self, g, dx, dy):
+        ok, sx, sy = g.get_start_point()
+        if self.text_mode and self.text_drag:
+            self.update_text_selection(self.to_image(sx + dx, sy + dy))
+            return
         if not self.current:
             return
-        ok, sx, sy = g.get_start_point()
         p = self.to_image(sx + dx, sy + dy)
         if self.current["tool"] in ("pen", "highlight"):
             self.current["pts"].append(p)
@@ -317,6 +367,10 @@ class EditorWindow(Gtk.ApplicationWindow):
 
     def on_drag_end(self, g, dx, dy):
         self.on_drag_update(g, dx, dy)
+        if self.text_mode:
+            self.text_drag = None
+            self.area.queue_draw()
+            return
         op, self.current = self.current, None
         if not op:
             return
@@ -336,6 +390,20 @@ class EditorWindow(Gtk.ApplicationWindow):
         ctrl = state & Gdk.ModifierType.CONTROL_MASK
         shift = state & Gdk.ModifierType.SHIFT_MASK
         key = Gdk.keyval_to_lower(keyval)
+        if ctrl and key == Gdk.KEY_t:
+            self.text_btn.set_active(not self.text_btn.get_active())
+            return True
+        if self.text_mode:
+            if ctrl and key == Gdk.KEY_c:
+                self.copy_text(all_words=not self.selected)
+                return True
+            if ctrl and key == Gdk.KEY_a:
+                self.selected = list(range(len(self.words)))
+                self.area.queue_draw()
+                return True
+            if keyval == Gdk.KEY_Escape:
+                self.text_btn.set_active(False)
+                return True
         if ctrl and key == Gdk.KEY_z:
             self.undo()
         elif ctrl and key == Gdk.KEY_c:
@@ -348,14 +416,123 @@ class EditorWindow(Gtk.ApplicationWindow):
             return False
         return True
 
+    # -- text extraction
+
+    def on_text_toggled(self, btn):
+        self.text_mode = btn.get_active()
+        self.tools_box.set_sensitive(not self.text_mode)
+        self.swatches_box.set_sensitive(not self.text_mode)
+        self.copy_all_btn.set_visible(self.text_mode)
+        self.area.set_cursor_from_name("text" if self.text_mode else "crosshair")
+        self.selected = []
+        if self.text_mode and self.ocr_key != self.edit_key():
+            self.run_ocr()
+        else:
+            self.status.set_label(self.idle_status())
+        self.area.queue_draw()
+
+    def edit_key(self):
+        return self.region()
+
+    def run_ocr(self):
+        """Find words and their boxes in the visible (cropped) image with Tesseract."""
+        self.words = []
+        self.status.set_label("Reading text…")
+        rx, ry, rw, _ = (round(v) for v in self.region())
+        scale = 2 if rw < 2000 else 1  # small screen text OCRs better enlarged
+        png = self.export_png(scale=scale, annotate=False)
+        try:
+            proc = Gio.Subprocess.new(["tesseract", "stdin", "stdout", "tsv"],
+                                      Gio.SubprocessFlags.STDIN_PIPE | Gio.SubprocessFlags.STDOUT_PIPE
+                                      | Gio.SubprocessFlags.STDERR_SILENCE)
+        except GLib.Error:
+            self.status.set_label("Needs Tesseract: sudo apt install tesseract-ocr")
+            return
+        key = self.edit_key()
+        proc.communicate_async(GLib.Bytes.new(png), None, self.on_ocr_done, (key, rx, ry, scale))
+
+    def on_ocr_done(self, proc, result, info):
+        key, rx, ry, scale = info
+        try:
+            _, out, _ = proc.communicate_finish(result)
+        except GLib.Error as e:
+            self.status.set_label(f"Text extraction failed: {e.message}")
+            return
+        words = []
+        for row in (out.get_data() or b"").decode("utf-8", "replace").splitlines()[1:]:
+            cols = row.split("\t")
+            if len(cols) < 12 or cols[0] != "5" or not cols[11].strip():
+                continue
+            block, par, line = int(cols[2]), int(cols[3]), int(cols[4])
+            left, top, width, height = (int(c) / scale for c in cols[6:10])
+            words.append({"rect": (rx + left, ry + top, width, height), "text": cols[11],
+                          "line": (block, par, line), "block": (block, par)})
+        self.words = words
+        self.ocr_key = key
+        self.status.set_label(self.idle_status())
+        self.area.queue_draw()
+
+    def idle_status(self):
+        if not self.text_mode:
+            return os.path.basename(self.path)
+        if not self.words:
+            return "No text found"
+        return "Drag over text to select · Ctrl+C to copy"
+
+    def word_at(self, p, max_dist=None):
+        """Index of the word under (or nearest to) image point p."""
+        best, best_d = None, None
+        px, py = p
+        for i, w in enumerate(self.words):
+            x, y, ww, wh = w["rect"]
+            dx = max(x - px, 0, px - (x + ww))
+            dy = max(y - py, 0, py - (y + wh))
+            d = math.hypot(dx, dy * 2)  # favour words on the same line
+            if best_d is None or d < best_d:
+                best, best_d = i, d
+        if best is not None and max_dist is not None and best_d > max_dist:
+            return None
+        return best
+
+    def update_text_selection(self, p):
+        drag = self.text_drag
+        if drag["anchor"] is not None:
+            # Started on a word: select in reading order, like normal text.
+            end = self.word_at(p)
+            a, b = sorted((drag["anchor"], end))
+            self.selected = list(range(a, b + 1))
+        else:
+            # Started on empty space: select every word the box touches.
+            mx, my, mw, mh = norm_rect(drag["start"], p)
+            drag["marquee"] = (mx, my, mw, mh)
+            self.selected = [i for i, w in enumerate(self.words)
+                             if w["rect"][0] < mx + mw and w["rect"][0] + w["rect"][2] > mx
+                             and w["rect"][1] < my + mh and w["rect"][1] + w["rect"][3] > my]
+        self.area.queue_draw()
+
+    def copy_text(self, all_words=False):
+        indices = range(len(self.words)) if all_words else sorted(self.selected)
+        parts, prev = [], None
+        for i in indices:
+            w = self.words[i]
+            if prev is not None:
+                parts.append(" " if w["line"] == prev["line"] else "\n" if w["block"] == prev["block"] else "\n\n")
+            parts.append(w["text"])
+            prev = w
+        text = "".join(parts)
+        if text:
+            self.app.set_clipboard(self.get_display(), Gdk.ContentProvider.new_for_bytes(
+                "text/plain;charset=utf-8", GLib.Bytes.new(text.encode())))
+            self.flash("Text copied to clipboard")
+
     # -- actions
 
     def flash(self, text):
         self.status.set_label(text)
-        GLib.timeout_add(1800, lambda: self.status.set_label(os.path.basename(self.path)) and False)
+        GLib.timeout_add(1800, lambda: self.status.set_label(self.idle_status()) and False)
 
     def undo(self):
-        if self.ops:
+        if self.ops and not self.text_mode:  # undoing a crop would invalidate the word boxes
             self.ops.pop()
             self.area.queue_draw()
 
@@ -515,12 +692,15 @@ class QuickSnip(Gtk.Application):
         self.notify_captured(path)
 
     def set_clipboard_png(self, display, png):
-        clipboard = display.get_clipboard()
         data = GLib.Bytes.new(png)
-        clipboard.set_content(Gdk.ContentProvider.new_union([
+        self.set_clipboard(display, Gdk.ContentProvider.new_union([
             Gdk.ContentProvider.new_for_bytes("image/png", data),
             Gdk.ContentProvider.new_for_value(Gdk.Texture.new_from_bytes(data)),
         ]))
+
+    def set_clipboard(self, display, provider):
+        clipboard = display.get_clipboard()
+        clipboard.set_content(provider)
         if not self.clipboard_held:
             # Keep the process alive (windowless) so the image stays pasteable.
             self.clipboard_held = True
